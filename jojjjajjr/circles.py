@@ -13,27 +13,39 @@ def circles(f, rs):
             align="center")
             .align(f.a.r)
             .f(1))
-        
-    # Create a controller lookup function
-    controller = midi_controller_lookup_fn(
-        "nanoKONTROL2 SLIDER/KNOB",
-        cmc=rs.midi,
-        channel="1"
-    )
+    
+    # Cache the controller function to avoid repeated creation
+    if not hasattr(circles, 'controller'):
+        circles.controller = midi_controller_lookup_fn(
+            "nanoKONTROL2 SLIDER/KNOB",
+            cmc=rs.midi,
+            channel="1"
+        )
+    controller = circles.controller
     
     # Get values from sliders for circles
     num_circles = int(controller(0, 0.3) * 15 + 3)  # 3 to 18 circles
     circle_radius = controller(1, 0.3) * 250  # 0 to 250 units
-    max_path_radius = controller(2, 0.5) * 1000  # 0 to 400 units
+    max_path_radius = controller(2, 0.5) * 1000  # 0 to 1000 units
     rotation_speed = controller(3, 0.0) * 0.4 - 0.2
     hue_rotation = controller(4, 0.0)  # 0 to 1 for color wheel rotation
-    num_rings = int(controller(17, 0.3) * 5 + 1)  # 1 to 6 rings
     
-    # Get values from sliders for text wave
+    # Get values from sliders for text wave effect
     wave_amplitude = controller(5, 0.3) * 5  # 0 to 5 for font weight range
     wave_phase = controller(6, 0.0) * math.pi * 2  # 0 to 2π radians
     wave_frequency = controller(7, 0.5) * 2 + 0.5  # 0.5 to 2.5 Hz
-    vertical_amplitude = controller(16, 0.3) * 1000  # 0 to 100 units for vertical movement
+    vertical_amplitude = controller(16, 0.3) * 100  # 0 to 100 units for vertical movement
+    
+    # Get values from sliders for shadow effect
+    shadow_angle = controller(17, 0.5) * 360 - 180  # -180 to 180 degrees
+    shadow_width = controller(18, 0.3) * 100 + 0.1  # 0 to 100 units
+    shadow_blur = controller(19, 0.3) * 20 + 0.1  # 0 to 20 units
+    stroke_width = controller(20, 0.3) * 10 + 0.1  # 0 to 10 units
+    
+    # Additional controls
+    num_rings = int(controller(21, 0.3) * 5 + 1)  # 1 to 6 rings
+    shadow_hue = controller(22, 0.0)  # 0 to 1 for shadow color hue
+    stroke_hue = controller(23, 0.0)  # 0 to 1 for stroke color hue
     
     # Create random parameters for each ring if they don't exist
     if not hasattr(circles, 'ring_params'):
@@ -45,59 +57,70 @@ def circles(f, rs):
                 'base_phase': random.uniform(0, math.pi * 2)  # Initial phase offset
             })
     
+    # Pre-calculate common values
+    two_pi = math.pi * 2
+    frame_rotation = f.i/60 * two_pi
+    circle_rect = Rect(circle_radius*2, circle_radius*2)
+    
     # Create the circles for each ring
     circles_list = []
-    for ring in range(num_rings):
-        # Calculate this ring's radius as a fraction of max_path_radius
-        ring_radius = max_path_radius * (ring + 1) / num_rings
-        
-        # Get this ring's rotation parameters
-        params = circles.ring_params[ring]
-        # Calculate continuous rotation based on frame
-        ring_rotation = (
-            params['base_phase'] + 
-            (f.i/60) * math.pi * 2 * rotation_speed * params['frequency'] * params['direction']
-        )
-        
-        for i in range(num_circles):
-            # Calculate position on the circular path
-            angle = (i / num_circles) * math.pi * 2 + ring_rotation
-            x = math.cos(angle) * ring_radius
-            y = math.sin(angle) * ring_radius
-            
-            # Calculate color (evenly spaced hues, vary by ring and position)
-            hue = ((i / num_circles) + (ring / num_rings) + hue_rotation) % 1
-            
-            # Create circle at position
-            circle = (P()
-                .oval(Rect(circle_radius*2, circle_radius*2))
-                .translate(x, y)
-                .f(hsl(hue, 0.6, 0.5)))
-            circles_list.append(circle)
+    circles_list.extend(
+        P()
+        .oval(circle_rect)
+        .translate(
+            math.cos((i / num_circles) * two_pi + 
+                    params['base_phase'] + 
+                    frame_rotation * rotation_speed * params['frequency'] * params['direction']) 
+                    * (max_path_radius * (ring + 1) / num_rings),
+            math.sin((i / num_circles) * two_pi + 
+                    params['base_phase'] + 
+                    frame_rotation * rotation_speed * params['frequency'] * params['direction']) 
+                    * (max_path_radius * (ring + 1) / num_rings))
+        .f(hsl(((i / num_circles) + (ring / num_rings) + hue_rotation) % 1, 0.6, 0.5))
+        for ring in range(num_rings)
+        for i in range(num_circles)
+        for params in [circles.ring_params[ring]]  # List comprehension trick to use ring_params
+    )
     
-    # Create undulating text using Glyphwise
+    # Pre-calculate wave values for text
+    time_phase = f.i/100
+    base_wave = wave_frequency * time_phase + wave_phase
+    
     def wave_style(g):
-        # Wave for font weight
-        weight_wave = math.sin(wave_frequency * g.i + wave_phase + f.i/100)
-        weight = (weight_wave + 1) / 2 * wave_amplitude
-        
-        # Wave for vertical position (offset phase by π/2 for interesting motion)
-        position_wave = math.sin(wave_frequency * g.i + wave_phase + f.i/100 + math.pi/2)
-        vertical_offset = position_wave * vertical_amplitude
-        
+        g_phase = wave_frequency * g.i + base_wave
         return Style(
             Font.MutatorSans(),
             450,
-            wght=weight,
-            tu=vertical_offset,
+            wght=((math.sin(g_phase) + 1) / 2) * wave_amplitude,
+            tu=math.sin(g_phase + math.pi/2) * vertical_amplitude,
             ro=1
         )
+    
+    # Define shadow function with current parameters
+    def shadow_and_clean(p):
+        return (p
+            .outline(shadow_blur)
+            .reverse()
+            .remove_overlap()
+            .castshadow(shadow_angle, shadow_width)
+            .explode()
+            .filter(lambda j, c: c.bounds().w > 20)
+            .implode()
+            .f(None)
+            .s(hsl(shadow_hue, s=1, l=0.4))
+            .sw(stroke_width))
+    
+    # Create text with both wave and shadow effects
+    text = (Glyphwise("JOJ\nJJA\nJJR", wave_style)
+        .align(f.a.r)
+        .f(1)
+        .layer(
+            lambda ps: ps.mapv(shadow_and_clean),
+            lambda ps: ps.s(hsl(stroke_hue)).sw(stroke_width)))
     
     # Combine circles and text
     return P([
         P(circles_list).translate(f.a.r.w/2, f.a.r.h/2),  # Centered circles
-        (Glyphwise("JOJ\nJJA\nJJR", wave_style)
-            .align(f.a.r)
-            .f(1))  # White text
+        text  # Text with wave and shadow effects
     ])
 
