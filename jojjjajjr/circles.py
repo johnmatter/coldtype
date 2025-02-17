@@ -3,13 +3,17 @@ from coldtype.midi.controllers import midi_controller_lookup_fn
 import math
 import random
 
-@animation((1080, 1080), bg=0, rstate=1, timeline=1200)
+# Global scale factor - adjust this to scale everything
+SCALE = 2.0
+ASPECT = 16/9
+
+@animation((1080 * SCALE * ASPECT, 1080 * SCALE), bg=0, rstate=1, timeline=1200)
 def circles(f, rs):
     if not rs.midi:
         return (StSt(
             "No MIDI Input Detected",
             Font.MutatorSans(),
-            30,
+            30 * SCALE,
             align="center")
             .align(f.a.r)
             .f(1))
@@ -25,8 +29,8 @@ def circles(f, rs):
     
     # Get values from sliders for circles
     num_circles = int(controller(0, 0.3) * 15 + 3)  # 3 to 18 circles
-    circle_radius = controller(1, 0.3) * 250  # 0 to 250 units
-    max_path_radius = controller(2, 0.5) * 1000  # 0 to 1000 units
+    circle_radius = controller(1, 0.3) * 500 * SCALE  # 0 to 250 units
+    max_path_radius = controller(2, 0.5) * 2000 * SCALE  # 0 to 1000 units
     rotation_speed = controller(3, 0.0) * 0.4 - 0.2
     hue_rotation = controller(4, 0.0)  # 0 to 1 for color wheel rotation
     
@@ -34,13 +38,13 @@ def circles(f, rs):
     wave_amplitude = controller(5, 0.3) * 5  # 0 to 5 for font weight range
     wave_phase = controller(6, 0.0) * math.pi * 2  # 0 to 2π radians
     wave_frequency = controller(7, 0.5) * 2 + 0.5  # 0.5 to 2.5 Hz
-    vertical_amplitude = controller(16, 0.3) * 100  # 0 to 100 units for vertical movement
+    vertical_amplitude = controller(16, 0.3) * 100 * SCALE  # 0 to 100 units for vertical movement
     
     # Get values from sliders for shadow effect
     shadow_angle = controller(17, 0.5) * 360 - 180  # -180 to 180 degrees
-    shadow_width = controller(18, 0.3) * 100 + 0.1  # 0 to 100 units
-    shadow_blur = controller(19, 0.3) * 20 + 0.1  # 0 to 20 units
-    stroke_width = controller(20, 0.3) * 10 + 0.1  # 0 to 10 units
+    shadow_width = controller(18, 0.3) * 100 * SCALE + 0.1  # 0 to 100 units
+    shadow_blur = controller(19, 0.3) * 20 * SCALE + 0.5  # 0 to 20 units
+    stroke_width = controller(20, 0.3) * 10 * SCALE + 0.1  # 0 to 10 units
     
     # Additional controls
     num_rings = int(controller(21, 0.3) * 5 + 1)  # 1 to 6 rings
@@ -90,7 +94,7 @@ def circles(f, rs):
         g_phase = wave_frequency * g.i + base_wave
         return Style(
             Font.MutatorSans(),
-            450,
+            450 * SCALE,  # Scale the font size
             wght=((math.sin(g_phase) + 1) / 2) * wave_amplitude,
             tu=math.sin(g_phase + math.pi/2) * vertical_amplitude,
             ro=1
@@ -102,12 +106,12 @@ def circles(f, rs):
             .outline(shadow_blur)
             .reverse()
             .remove_overlap()
-            .castshadow(shadow_angle, shadow_width)
+            .castshadow(shadow_angle, shadow_width, fill=hsl(shadow_hue, s=0.8, l=0.3))
             .explode()
-            .filter(lambda j, c: c.bounds().w > 20)
+            .filter(lambda j, c: c.bounds().w > 20 * SCALE)  # Scale the filter threshold
             .implode()
-            .f(None)
-            .s(hsl(shadow_hue, s=1, l=0.4))
+            .f(hsl(shadow_hue, s=0.6, l=0.5))  # Fill the main text
+            .s(hsl(stroke_hue, s=1, l=0.5))  # Stroke color
             .sw(stroke_width))
     
     # Create text with both wave and shadow effects
@@ -115,8 +119,7 @@ def circles(f, rs):
         .align(f.a.r)
         .f(1)
         .layer(
-            lambda ps: ps.mapv(shadow_and_clean),
-            lambda ps: ps.s(hsl(stroke_hue)).sw(stroke_width)))
+            lambda ps: ps.mapv(shadow_and_clean)))
     
     # Combine circles and text
     return P([
