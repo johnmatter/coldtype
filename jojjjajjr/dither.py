@@ -15,7 +15,7 @@ dither_cache = {
     'params': None
 }
 
-def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.5, scale=12):
+def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.50, scale=12):
     """
     Create a dithered color field using Floyd-Steinberg dithering.
     hue_fn: Function that takes x, y and returns a hue value (0-1)
@@ -43,7 +43,7 @@ def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.5,
     
     # Apply Floyd-Steinberg dithering to quantize hues to discrete values
     # Number of discrete hue levels - lower is faster but less detailed
-    num_hue_levels = 8
+    num_hue_levels = 64
     
     # Make a copy for dithering
     dithered_field = hues.copy()
@@ -72,11 +72,7 @@ def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.5,
                 if x < dither_width - 1:
                     dithered_field[y + 1, x + 1] += error * 1/16
     
-    # Use a more efficient approach to create the visual representation
-    # Instead of thousands of small rectangles, create a grid of rectangles with different colors
     rects = []
-    
-    # Group similar colors to reduce the number of path objects
     unique_hues = {}
     
     for y in range(dither_height):
@@ -90,7 +86,6 @@ def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.5,
             
             unique_hues[hue_key].append((x, y))
     
-    # Create one path per unique color instead of one path per pixel
     for hue, positions in unique_hues.items():
         color_path = P()
         for x, y in positions:
@@ -102,7 +97,7 @@ def floyd_steinberg_dither(width, height, hue_fn, saturation=0.7, lightness=0.5,
     # Combine all the rectangles into a single path
     return P(rects)
 
-@animation((width, height), bg=0, rstate=1)
+@animation((width, height), bg=0, rstate=1, timeline=1200)
 def simple_midi(f, rs):
     # shortcircuit if we don't see any MIDI input
     if not rs.midi:
@@ -142,19 +137,16 @@ def simple_midi(f, rs):
     )
     
     # Create a time-based animated hue function
-    time_factor = f.i / 60 * dither_speed
+    time_factor = f.i / 50 * dither_speed
     
     def hue_function(x, y):
-        # Create a complex gradient based on position and time
-        # This creates a swirling gradient effect
         angle = math.atan2(y - 0.5, x - 0.5)
         dist = math.sqrt((x - 0.5)**2 + (y - 0.5)**2) * 2
         
-        # Combine different factors for an interesting gradient
         h = (math.sin(angle * dither_complexity + time_factor) * 0.3 + 
              math.cos(dist * dither_complexity + time_factor) * 0.3 +
              hue + 
-             time_factor * 0.1) % 1.0
+             time_factor * 2.5) % 1.0
         
         return h
     
@@ -162,7 +154,8 @@ def simple_midi(f, rs):
     current_params = (time_factor, dither_complexity, hue, dither_scale)
     if dither_cache['params'] != current_params:
         # Parameters changed, regenerate the background
-        background = floyd_steinberg_dither(width, height, hue_function, scale=dither_scale)
+        background = floyd_steinberg_dither(width, height, hue_function,
+                                            saturation=0.3, lightness=0.5, scale=dither_scale)
         # Update the cache
         dither_cache['background'] = background
         dither_cache['params'] = current_params
@@ -171,7 +164,7 @@ def simple_midi(f, rs):
         background = dither_cache['background']
     
     # Create the circle on top
-    circle = P().oval(circle_rect).f(hsl(hue, 0.3, 0.5))
+    circle = P().oval(circle_rect).f(hsl(hue, 0.6, 0.5))
     
     # Return both the background and the circle
     return P([
