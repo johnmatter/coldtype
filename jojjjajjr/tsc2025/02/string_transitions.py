@@ -634,9 +634,8 @@ bg_hsl = hsl(avg_hue, 0.54, 0.10)
 keyframes = {
     "kick": KeyFrame(
         strings=["kick", "kick", "ki", "ck"],
-        positions=[(0.54, 0.70), (0.70, 0.16), (0.22, 0.30), (0.44, 0.36)],
-        sizes=[611, 249, 401, 283],
-        # Use first part of the active palette
+        positions=[(0.54, 0.26), (0.62, 0.45), (0.22, 0.61), (0.44, 0.62)],
+        sizes=[611, 200, 401, 283],
         colors=active_palette,
         midi_note=[20, 36],
         font="GT-Maru-Mono",
@@ -644,10 +643,9 @@ keyframes = {
     ),
     
     "snare": KeyFrame(
-        strings=["snare", "are", "sn", "snare"],
-        positions=[(0.34, 0.80), (0.56, 0.58), (0.22, 0.50), (0.68, 0.40)],
-        sizes=[317, 264, 496, 284],
-        # Use middle part of the active palette
+        strings=["snare", "snare", "sn", "are"],
+        positions=[(0.36, 0.60), (0.57, 0.80), (0.23, 0.41), (0.46, 0.44)],
+        sizes=[317, 364, 317, 217],
         colors=active_palette,
         midi_note=[25, 41],
         font="GT-Maru-Mono",
@@ -655,10 +653,9 @@ keyframes = {
     ),
     
     "hat": KeyFrame(
-        strings=["hi", "hat", "hihat", "hh"],
-        positions=[(0.40, 0.6), (0.61, 0.60), (0.42, 0.36), (0.68, 0.41)],
-        sizes=[467, 150, 150, 308],
-        # Use last part of the active palette
+        strings=["hihat", "hh", "hi", "hat"],
+        positions=[(0.43, 0.73), (0.37, 0.36), (0.73, 0.45), (0.72, 0.25)],
+        sizes=[367, 550, 350, 208],
         colors=active_palette,
         midi_note=[54],
         font="GT-Maru-Mono",
@@ -669,8 +666,7 @@ keyframes = {
 @animation(
     (width, height),
 	tl=midi,
-	bg=-1,
-	audio=audio_file,
+	bg=1,
 	release=custom_exporter
 )
 def string_transitions(f:Frame):
