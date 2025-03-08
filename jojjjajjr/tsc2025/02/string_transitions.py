@@ -11,7 +11,7 @@ aspect = 16/9
 height = 1080
 width = height * aspect
 
-# exporter with prores background transparency
+# exporter with transparency
 def custom_exporter(a:animation):
     exporter  = FFMPEGExport(a)
     exporter.fmt = "mov"
@@ -27,6 +27,12 @@ def custom_exporter(a:animation):
 class Palette:
     def __init__(self, colors = None):
         self.colors = colors
+
+    def get_color(self, index):
+        return self.colors[index % len(self.colors)]
+    
+    def get_colors(self):
+        return self.colors
 
     def normalize_hsl(h, s, l):
         """Converts HSL from (0–360, 0–100, 0–100) to (0–1, 0–1, 0–1)."""
@@ -50,33 +56,29 @@ class Palette:
             Green, D. A. (2011), "A colour scheme for the display of astronomical intensity images"
             https://astron-soc.in/bulletin/11June/289392011.pdf
         """
-        import numpy as np
-        
-        # Generate angle values
+        # generate angle values
         phi = 2 * np.pi * (start/3 + rot * np.linspace(0, 1, n_colors))
         
-        # Calculate RGB values
+        # calculate rgb values
         a = hue * np.cos(phi)
         b = hue * np.sin(phi)
         
-        # Generate lightness values, gamma corrected
+        # generate lightness values, gamma corrected
         l = np.linspace(0, 1, n_colors) ** gamma
         
-        # Calculate RGB channels
+        # calculate rgb channels
         r = l + a
         g = l + b * 0.5 - a * 0.5
         b = l - a * 0.5 - b * 0.5
         
-        # Clip to [0, 1] range
+        # clip to [0, 1] range
         r = np.clip(r, 0, 1)
         g = np.clip(g, 0, 1)
         b = np.clip(b, 0, 1)
         
-        # Convert RGB to HSL
+        # convert rgb to hsl
         rgb_colors = list(zip(r, g, b))
         hsl_colors = [rgb_to_hsl(*c) for c in rgb_colors]
-        
-        # Return HSL colors
         return hsl_colors
 
     def complementary(self, base_hue=0.0, saturation=0.8, lightness=0.6, variations=5):
@@ -167,42 +169,6 @@ class Palette:
             colors.append((hue, saturation, lightness))
             
         return colors
-
-    def get_color(self, index):
-        return self.colors[index % len(self.colors)]
-    
-    def get_colors(self):
-        return self.colors
-
-    def interpolate_colors(self, colors, num_steps):
-        if len(colors) < 2:
-            return colors
-        interpolated_colors = []
-        
-        # Interpolate in HSL colorspace
-        for i in range(len(colors) - 1):
-            c1, c2 = colors[i], colors[i + 1]
-            h1, s1, l1 = c1
-            h2, s2, l2 = c2
-            
-            # Handle hue wrapping for shortest path
-            if abs(h1 - h2) > 0.5:
-                if h1 > h2:
-                    h2 += 1.0
-                else:
-                    h1 += 1.0
-            
-            # Create interpolation steps
-            steps = np.linspace(0, 1, num_steps)
-            segment = [((h1 * (1 - t) + h2 * t) % 1.0,
-                      s1 * (1 - t) + s2 * t,
-                      l1 * (1 - t) + l2 * t) for t in steps]
-            
-            interpolated_colors.extend(segment)
-        
-        # Ensure result is a list of tuples with float values
-        result = [tuple(float(x) for x in c) for c in interpolated_colors]
-        return result
 
 class KeyFrame:
     """
@@ -301,13 +267,12 @@ class KeyFrame:
 # Generate palettes
 pallete = Palette()
 
-# Create different color palettes
 cube_helix_colors = pallete.cube_helix(
-    n_colors=6,        # Number of colors in the palette
-    start=0.21,         # Starting position in the helix (0-3)
-    rot=0.45,           # Number of rotations around the helix
-    hue=0.58,           # Saturation factor
-    gamma=0.00          # Gamma correction for brightness
+    n_colors=6,
+    start=0.21,
+    rot=0.45,
+    hue=0.58,
+    gamma=0.00
 )
 
 complementary_colors = pallete.complementary(
@@ -343,7 +308,9 @@ active_palette = complementary_colors
 # prepend white
 active_palette = [(0, 0, 1)] + active_palette
 
+# use average hue for background
 avg_hue = sum(c[0] for c in active_palette) / len(active_palette)
+avg_hue = (avg_hue + 0.5) % 1.0 # complement
 bg_hsl = hsl(avg_hue, 0.54, 0.10)
 
 keyframes = {
