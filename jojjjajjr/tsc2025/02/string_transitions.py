@@ -1,5 +1,6 @@
 from coldtype import *
 import numpy as np
+import colorspacious as cs
 
 # Path to your MIDI file and WAV audio file
 midi_file = ººsiblingºº("media/tsc_beat1.mid")  # Using sibling function like in drumkit.py
@@ -12,6 +13,199 @@ midi = MidiTimeline(midi_file)
 aspect = 16/9
 height = 1080
 width = height * aspect
+
+# exporter with prores background transparency
+def custom_exporter(a:animation):
+    exporter  = FFMPEGExport(a)
+    exporter.fmt = "mov"
+    exporter.args = exporter.args[:-4]
+    exporter.args.extend([
+        "-c:v", "prores_ks",
+        "-c:a", "pcm_s16le",
+        "-profile:v", "5",
+        "-pix_fmt", "yuva422p10le",
+    ])
+    exporter.write(verbose=True)
+
+class Palette:
+    def __init__(self, colors = None):
+        self.colors = colors
+
+    def normalize_hsl(h, s, l):
+        """Converts HSL from (0–360, 0–100, 0–100) to (0–1, 0–1, 0–1)."""
+        return (h / 360, s / 100, l / 100)
+
+    def cube_helix(self, n_colors=16, start=0.5, rot=1.0, hue=0.8, gamma=1.0):
+        """
+        Generate a color palette using the cube helix algorithm.
+        
+        Args:
+            n_colors: Number of colors in the palette
+            start: Starting position in the helix, in rotations (0 to 3)
+            rot: Number of rotations
+            hue: Saturation factor
+            gamma: Gamma correction factor
+            
+        Returns:
+            List of HSL colors normalized to 0-1 range
+            
+        Reference:
+            Green, D. A. (2011), "A colour scheme for the display of astronomical intensity images"
+            https://astron-soc.in/bulletin/11June/289392011.pdf
+        """
+        import numpy as np
+        
+        # Generate angle values
+        phi = 2 * np.pi * (start/3 + rot * np.linspace(0, 1, n_colors))
+        
+        # Calculate RGB values
+        a = hue * np.cos(phi)
+        b = hue * np.sin(phi)
+        
+        # Generate lightness values, gamma corrected
+        l = np.linspace(0, 1, n_colors) ** gamma
+        
+        # Calculate RGB channels
+        r = l + a
+        g = l + b * 0.5 - a * 0.5
+        b = l - a * 0.5 - b * 0.5
+        
+        # Clip to [0, 1] range
+        r = np.clip(r, 0, 1)
+        g = np.clip(g, 0, 1)
+        b = np.clip(b, 0, 1)
+        
+        # Convert RGB to HSL
+        rgb_colors = list(zip(r, g, b))
+        hsl_colors = [rgb_to_hsl(*c) for c in rgb_colors]
+        
+        # Return HSL colors
+        return hsl_colors
+
+    def complementary(self, base_hue=0.0, saturation=0.8, lightness=0.6, variations=5):
+        """
+        Generate a palette with complementary colors (colors opposite on the color wheel).
+        
+        Args:
+            base_hue: Base hue value (0-1)
+            saturation: Saturation value (0-1)
+            lightness: Lightness value (0-1)
+            variations: Number of variations for each complementary color
+            
+        Returns:
+            List of HSL colors
+        """
+        complementary_hue = (base_hue + 0.5) % 1.0
+        
+        colors = []
+        
+        # Generate variations for the base hue
+        for i in range(variations):
+            # Vary lightness for the base hue
+            l_var = max(0.2, min(0.9, lightness - 0.2 + (i * 0.4 / variations)))
+            colors.append((base_hue, saturation, l_var))
+            
+        # Generate variations for the complementary hue
+        for i in range(variations):
+            # Vary lightness for the complementary hue
+            l_var = max(0.2, min(0.9, lightness - 0.2 + (i * 0.4 / variations)))
+            colors.append((complementary_hue, saturation, l_var))
+            
+        return colors
+    
+    def triadic(self, base_hue=0.0, saturation=0.8, lightness=0.6, variations=3):
+        """
+        Generate a palette with triadic colors (three colors equally spaced on the color wheel).
+        
+        Args:
+            base_hue: Base hue value (0-1)
+            saturation: Saturation value (0-1)
+            lightness: Lightness value (0-1)
+            variations: Number of variations for each triad color
+            
+        Returns:
+            List of HSL colors
+        """
+        triad_hue1 = (base_hue + 1/3) % 1.0
+        triad_hue2 = (base_hue + 2/3) % 1.0
+        
+        colors = []
+        
+        # Generate variations for each hue in the triad
+        for hue in [base_hue, triad_hue1, triad_hue2]:
+            for i in range(variations):
+                # Vary saturation and lightness
+                s_var = max(0.3, min(1.0, saturation - 0.1 + (i * 0.2 / variations)))
+                l_var = max(0.3, min(0.9, lightness - 0.1 + (i * 0.2 / variations)))
+                colors.append((hue, s_var, l_var))
+                
+        return colors
+    
+    def gradient(self, start_hue=0.0, end_hue=0.6, saturation=0.8, lightness=0.6, steps=10):
+        """
+        Generate a smooth gradient between two hues.
+        
+        Args:
+            start_hue: Starting hue value (0-1)
+            end_hue: Ending hue value (0-1)
+            saturation: Saturation value (0-1)
+            lightness: Lightness value (0-1)
+            steps: Number of steps in the gradient
+            
+        Returns:
+            List of HSL colors
+        """
+        # Handle hue wrapping for shortest path
+        if abs(start_hue - end_hue) > 0.5:
+            if start_hue > end_hue:
+                end_hue += 1.0
+            else:
+                start_hue += 1.0
+                
+        colors = []
+        
+        for i in range(steps):
+            t = i / (steps - 1)
+            hue = (start_hue * (1 - t) + end_hue * t) % 1.0
+            colors.append((hue, saturation, lightness))
+            
+        return colors
+
+    def get_color(self, index):
+        return self.colors[index % len(self.colors)]
+    
+    def get_colors(self):
+        return self.colors
+
+    def interpolate_colors(self, colors, num_steps):
+        if len(colors) < 2:
+            return colors
+        interpolated_colors = []
+        
+        # Interpolate in HSL colorspace
+        for i in range(len(colors) - 1):
+            c1, c2 = colors[i], colors[i + 1]
+            h1, s1, l1 = c1
+            h2, s2, l2 = c2
+            
+            # Handle hue wrapping for shortest path
+            if abs(h1 - h2) > 0.5:
+                if h1 > h2:
+                    h2 += 1.0
+                else:
+                    h1 += 1.0
+            
+            # Create interpolation steps
+            steps = np.linspace(0, 1, num_steps)
+            segment = [((h1 * (1 - t) + h2 * t) % 1.0,
+                      s1 * (1 - t) + s2 * t,
+                      l1 * (1 - t) + l2 * t) for t in steps]
+            
+            interpolated_colors.extend(segment)
+        
+        # Ensure result is a list of tuples with float values
+        result = [tuple(float(x) for x in c) for c in interpolated_colors]
+        return result
 
 class KeyFrame:
     """
@@ -390,12 +584,60 @@ class KeyFrame:
         return P(*result)
 
 
+pallete = Palette()
+
+# Create different color palettes
+cube_helix_colors = pallete.cube_helix(
+    n_colors=6,        # Number of colors in the palette
+    start=0.21,         # Starting position in the helix (0-3)
+    rot=0.45,           # Number of rotations around the helix
+    hue=0.58,           # Saturation factor
+    gamma=0.00          # Gamma correction for brightness
+)
+
+complementary_colors = pallete.complementary(
+    base_hue=-0.02,
+    saturation=0.66,
+    lightness=0.85,
+    variations=2
+)
+
+triadic_colors = pallete.triadic(
+    base_hue=0.54,
+	saturation=0.56,
+	lightness=0.77,
+	variations=2
+)
+
+gradient_colors = pallete.gradient(
+    start_hue=0.04,
+	end_hue=0.45,
+	saturation=0.61,
+	lightness=0.39,
+	steps=5
+)
+
+# Choose which palette to use for the animation
+# active_palette = cube_helix_colors
+active_palette = complementary_colors
+# active_palette = triadic_colors
+# active_palette = gradient_colors
+
+# active_palette = active_palette[2:5]
+
+# prepend white
+active_palette = [(0, 0, 1)] + active_palette
+
+avg_hue = sum(c[0] for c in active_palette) / len(active_palette)
+bg_hsl = hsl(avg_hue, 0.54, 0.10)
+
 keyframes = {
     "kick": KeyFrame(
         strings=["kick", "kick", "ki", "ck"],
         positions=[(0.54, 0.70), (0.70, 0.16), (0.22, 0.30), (0.44, 0.36)],
         sizes=[611, 249, 401, 283],
-        colors=[(0.60, 0.50, 0.5), (0.62, 0.34, 0.68), (0.58, 0.50, 0.5), (0.52, 0.34, 0.46)],
+        # Use first part of the active palette
+        colors=active_palette,
         midi_note=[20, 36],
         font="GT-Maru-Mono",
         use_envelope_for_color=False,
@@ -405,7 +647,8 @@ keyframes = {
         strings=["snare", "are", "sn", "snare"],
         positions=[(0.34, 0.80), (0.56, 0.58), (0.22, 0.50), (0.68, 0.40)],
         sizes=[317, 264, 496, 284],
-        colors=[(0.00, 0.36, 0.6), (0.85, 0.80, 0.80), (-0.06, 0.85, 0.6), (0.10, 0.56, 0.6)],
+        # Use middle part of the active palette
+        colors=active_palette,
         midi_note=[25, 41],
         font="GT-Maru-Mono",
         use_envelope_for_color=False,
@@ -415,15 +658,21 @@ keyframes = {
         strings=["hi", "hat", "hihat", "hh"],
         positions=[(0.40, 0.6), (0.61, 0.60), (0.42, 0.36), (0.68, 0.41)],
         sizes=[467, 150, 150, 308],
-        colors=[(0.16, 0.39, 0.6), (0.27, 0.62, 0.6), (0.08, 0.28, 0.6), (0.24, 0.08, 0.48)],
+        # Use last part of the active palette
+        colors=active_palette,
         midi_note=[54],
         font="GT-Maru-Mono",
         use_envelope_for_color=False,
     )
-    
 }
 
-@animation((width, height), tl=midi, bg=1, audio=audio_file, release=λ.export("h264", loops=4))
+@animation(
+    (width, height),
+	tl=midi,
+	bg=-1,
+	audio=audio_file,
+	release=custom_exporter
+)
 def string_transitions(f:Frame):
     """
     smoothly transition between keyframes based on MIDI triggers.
@@ -447,16 +696,13 @@ def string_transitions(f:Frame):
                 active_levels[key] = 0
     
     # Background element that reacts to the overall energy
-    total_energy = sum(level for level in active_levels.values())
-    # bg_intensity = min(0.2 + total_energy * 0.1, 0.3)
-    # bg = P(Rect(width, height)).f(hsl(0.14, 0.86, bg_intensity))
-    bg = P(Rect(width, height)).f(hsl(0.47, 0.33, 0.26))
+    bg = P(Rect(width, height)).f(bg_hsl)
     
     # Find the most active keyframe for blending
     active_keys = [(k, v) for k, v in active_levels.items() if v > 0.01]
     active_keys.sort(key=lambda x: x[1], reverse=True)
     
-    elements = []
+    elements = [bg]
     
     # If we have active keyframes
     if active_keys:
@@ -488,4 +734,4 @@ def string_transitions(f:Frame):
     composition = P(*elements)
     
     # Return the complete frame
-    return P(bg, composition) 
+    return P(composition) 
