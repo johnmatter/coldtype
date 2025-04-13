@@ -329,8 +329,32 @@ Huge update, attempting to future proof things
 ### Added
 - Experimental support for limited keyboard layout remapping via command line -kl argument
 
-## [0.11.4] - 2025-02-05
+## [0.11.4] - 2025-02-20
 ### Added
 - `ViewerSoloFirst` and `ViewerSoloLast` shortcuts
 ### Changed
 - `VIEWER_SOLO` is now a config option, not a one-off cli arg in renderer
+
+## [0.11.5] - 2025-03-04
+### Added
+- `set_709` on `animation.export`/`FFMPEGExport` (so you can use older `ffmpeg` releases to export animations)
+
+## [0.11.6] - 2025-03-11
+### Added
+- better support for custom output with ct viewseq
+- experimental support for `Theme` class to set multiple color styles from a single object
+### Fixed
+- blender venv-inlining now look for a "src" directory if it exists (to match new pyproject.toml-enforced directory structure)
+
+## [0.12.0] - 2025-03-18
+### Changed
+- base dependencies for coldtype (i.e. coldtype installed without any extra) no longer support "extended" font formats (woff, ufo, etc.), though [viewer] extra does still provide support for these; mido requirement has also been moved out of base into viewer; the point of this is to reduce the complexity of a "minimal" coldtype installation (i.e. when embedded as a backend service in another python application or a Blender extension, e.g.)
+
+## [0.12.1] - 2025-03-23
+### Changed
+- refinements to Coldtype 2D panel in Blender for timeline workflow
+
+## [0.12.2] - 2025-03-31
+### Fixed
+- ability to set workarea in coldtype 2d panel (blender)
+- memory bug in harfbuzz bounding box calculation by downgrading to <0.47

@@ -28,7 +28,7 @@ def render(r):
             .translate(0, 5))
 ```
 
-Running that code results in this image popping up on your screen in a dedicated window:
+Saving that code in a file named test.py and running `coldtype test.py` (or `uv run ct test.py` if you’re using `uv`) results in this image popping up on your screen in a dedicated window:
 
 ![An example](https://raw.githubusercontent.com/goodhertz/coldtype/main/examples/renders/simple_render.png)
 
@@ -45,7 +45,13 @@ The best way to get familiar with Coldtype is to look at and try modifying some 
 To get a development environment for Coldtype:
 
 ```
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -e .[viewer]
+git clone https://github.com/coldtype/coldtype.git
+uv sync --extra viewer
+uv run ct examples/animations/808.py
+```
+
+To run tests, etc.
+
+```
+uv sync --extra dev
 ```
