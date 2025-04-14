@@ -27,6 +27,7 @@ from coldtype.renderable import renderable, animation, Action, Overlay, runnable
 
 from coldtype.renderer.keyboard import KeyboardShortcut, LAYOUT_REMAPS
 from coldtype.osutil import show_in_finder
+from coldtype.renderer.gpu import GPUContext
 
 try:
     import skia
@@ -99,7 +100,7 @@ class Renderer():
 
             indices=parser.add_argument("-i", "--indices", type=str, default=None),
 
-            output_folder=parser.add_argument("-of", "--output-folder", type=str, default=None, help="If you don’t want to render to the default output location, specify that here."),
+            output_folder=parser.add_argument("-of", "--output-folder", type=str, default=None, help="If you don't want to render to the default output location, specify that here."),
 
             show_exit_code=parser.add_argument("-sec", "--show-exit-code", action="store_true", default=False, help=argparse.SUPPRESS),
 
@@ -188,6 +189,24 @@ class Renderer():
 
         set_ffmpeg_command(self.source_reader.config.ffmpeg_command)
 
+        # Initialize GPU context if requested and available
+        self.gpu_context = None
+        if self.source_reader.config.gpu:
+            try:
+                # Pass initial extent if available, otherwise default
+                initial_extent = self.extent or Rect(1080, 1080)
+                self.gpu_context = GPUContext(initial_extent.w, initial_extent.h)
+                if not self.gpu_context.context: # Check if context creation failed within GPUContext
+                    print("WARNING: GPU context requested but failed to initialize. Falling back to CPU.")
+                    self.gpu_context = None # Ensure it's None
+                else:
+                    print("INFO: GPU context initialized successfully.")
+            except Exception as e:
+                print(f"WARNING: Failed to initialize GPU context: {e}. Falling back to CPU.")
+                if self.gpu_context:
+                    self.gpu_context.terminate()
+                self.gpu_context = None
+
         # for multiplex mode
         self.running_renderers = []
         self.completed_renderers = []
@@ -264,7 +283,7 @@ class Renderer():
         # TODO check exists here on filepath
         self.watchees = []
         self.add_watchee([Watchable.Source, self.source_reader.filepath, None])
-
+        
         ph = path_hash(self.source_reader.filepath)
         self.add_watchee([Watchable.Generic, Path(f"~/.coldtype/{ph}_input.json").expanduser(), None])
         
@@ -471,8 +490,14 @@ class Renderer():
         
         self.extent = extent
         
-        #if needs_new_context:
-        #    self.winmans.did_reset_extent(self.extent)
+        # Resize GPU context if it exists and extent changed
+        if self.gpu_context and self.needs_new_context:
+            self.gpu_context.resize(self.extent.w, self.extent.h)
+            if not self.gpu_context.surface:
+                print("WARNING: Failed to resize GPU surface. Disabling GPU context.")
+                self.gpu_context.terminate()
+                self.gpu_context = None
+                self.needs_new_context = True # Force CPU context recreation if needed
 
         return needs_new_context
     
@@ -780,7 +805,7 @@ class Renderer():
             print("Self rasterizing")
             return True
         
-        did_rasterize = render.rasterize(self.source_reader.config, content, rp)
+        did_rasterize = render.rasterize(self.source_reader.config, content, rp, gpu_context=self.gpu_context)
         if did_rasterize:
             return False
         
@@ -801,8 +826,9 @@ class Renderer():
                     content = content.ch(skfx.precompose(render.rect, scale=scale))
                     render.last_result = SkiaImage(content.img().get("src"))
                 
-                ctx = None
-                if self.winmans.glsk and self.winmans.glsk.context and not self.args.cpu_render:
+                ctx = self.gpu_context.context if self.gpu_context else None
+                if not ctx and self.winmans.glsk and self.winmans.glsk.context and not self.args.cpu_render:
+                    # Fallback to existing CPU-based Skia context if GPU not available/failed
                     ctx = self.winmans.glsk.context
                 
                 if postprocess:
@@ -812,7 +838,8 @@ class Renderer():
                     render.rect,
                     str(path),
                     scale=scale,
-                    context=ctx,
+                    #context=ctx, # Context is now implicitly handled by gpu_context
+                    gpu_context=self.gpu_context,
                     style=render.style)
             elif render.fmt == "pdf":
                 SkiaPen.PDFOnePage(content, render.rect, str(path), scale=scale)
@@ -1517,6 +1544,12 @@ class Renderer():
         if self.state.playing > 0:
             self.on_action(Action.PreviewStoryboardNext)
         
+        # Handle GPU context buffer swaps if visible
+        if self.gpu_context:
+            self.gpu_context.flush_and_submit()
+            # Only swap if the context's window is visible (might not be for offscreen)
+            self.gpu_context.swap_buffers()
+
         for idx, (_, wp, flag, last_mod) in enumerate(self.watchees):
             wp:Path = wp
             if wp.exists():
@@ -1771,6 +1804,9 @@ class Renderer():
             print(self.profiler)
             self.profiler.disable()
             self.profiler.dump_stats("profile_result")
+
+        if self.gpu_context:
+            self.gpu_context.terminate()
 
 
 def main(winmans=Winmans, profile=None):

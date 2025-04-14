@@ -501,7 +501,7 @@ class renderable():
             res.data(frame=self.rect)
         return res
     
-    def rasterize(self, config, content, render_pass):
+    def rasterize(self, config, content, render_pass, gpu_context=None):
         return False
     
     def render_and_rasterize_frame(self, frame, scale=1, style=None) -> str:

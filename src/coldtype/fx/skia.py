@@ -8,6 +8,7 @@ from pathlib import Path
 from fontTools.svgLib import SVGPath
 from fontTools.misc.transform import Transform
 
+import numpy as np
 from coldtype.fx.chainable import Chainable
 from coldtype.color import normalize_color, bw
 from coldtype.img.blendmode import BlendMode
@@ -17,7 +18,9 @@ from coldtype.geometry import Rect
 
 import coldtype.skiashim as skiashim
 
-SKIA_CONTEXT = None
+# Global context variables (consider refactoring to avoid globals)
+SKIA_CONTEXT = None  # Legacy CPU context
+GPU_CONTEXT = None   # GPU context for acceleration
 
 class Skfi():
     @staticmethod
@@ -227,6 +230,7 @@ def potrace(rect, invert=True,
     alphamax=1.0, #  0.0 (polygon) to 1.3333 (no corners)
     opticurve=1,
     opttolerance=0.2, # 0 -1
+    gpu_context=None,
     ):
     """Chainable function for tracing a pen/image-on-pen ; can be combined with a previous call to phototype for better control of blurring/edges"""
     from PIL import Image
@@ -235,7 +239,9 @@ def potrace(rect, invert=True,
         if invert:
             pen = pen.copy().layer(1, lambda _: P(rect).f(1).blendmode(BlendMode.Difference))
 
-        res = SkiaPen.Precompose(pen, rect, SKIA_CONTEXT)
+        res = SkiaPen.Precompose(pen, rect, 
+            context=SKIA_CONTEXT, 
+            gpu_context=gpu_context or GPU_CONTEXT)
         pilimg = Image.fromarray(res.convert(alphaType=skia.kUnpremul_AlphaType))
         bmp = potracer.Bitmap(pilimg)
         path = bmp.trace(turdsize, turnpolicy, alphamax, opticurve, opttolerance)
@@ -263,10 +269,12 @@ def precompose(rect,
     scale=1,
     disk=False,
     style=None,
+    gpu_context=None,
     ):
     def _precompose(pen):
         img = SkiaPen.Precompose(pen, rect,             
             context=SKIA_CONTEXT,
+            gpu_context=gpu_context or GPU_CONTEXT,
             scale=scale,
             disk=disk,
             style=style)
@@ -279,14 +287,18 @@ def precompose(rect,
     return Chainable(_precompose)
 
 
-def rasterized(rect, scale=1, wrapped=False):
+def rasterized(rect, scale=1, wrapped=False, gpu_context=None):
     """
     Same as precompose but returns the Image created rather
     than setting that image as the attr-image of this pen
     """
     from coldtype.img.skiaimage import SkiaImage
     def _rasterized(pen):
-        precomposed = SkiaPen.Precompose(pen, rect, scale=scale, context=SKIA_CONTEXT, disk=False)
+        precomposed = SkiaPen.Precompose(pen, rect, 
+            scale=scale, 
+            context=SKIA_CONTEXT, 
+            gpu_context=gpu_context or GPU_CONTEXT, 
+            disk=False)
         if wrapped:
             return SkiaImage(precomposed)
         else:
@@ -294,18 +306,18 @@ def rasterized(rect, scale=1, wrapped=False):
     return _rasterized, dict(returns=SkiaImage if wrapped else skia.Image)
 
 
-def rasterize(rect, path):
+def rasterize(rect, path, gpu_context=None):
     def _rasterize(pen):
-        pen.ch(precompose(rect)).img().get("src").save(str(Path(path).expanduser()), skia.kPNG)
+        pen.ch(precompose(rect, gpu_context=gpu_context)).img().get("src").save(str(Path(path).expanduser()), skia.kPNG)
         return None
     return _rasterize
 
 
-def mod_pixels(rect, scale=0.1, mod=lambda rgba: None):
+def mod_pixels(rect, scale=0.1, mod=lambda rgba: None, gpu_context=None):
     import PIL.Image
     
     def _mod_pixels(pen):
-        raster = pen.ch(rasterized(rect, scale=scale))
+        raster = pen.ch(rasterized(rect, scale=scale, gpu_context=gpu_context))
         pi = PIL.Image.fromarray(raster, "RGBa")
         for x in range(pi.width):
             for y in range(pi.height):
@@ -348,13 +360,13 @@ def warp_image(image, rect, mod):
     return skia.Image.fromarray(image_rgba)
 
 
-def warp(rect, mod):
+def warp(rect, mod, gpu_context=None):
     from skimage import img_as_ubyte
     from skimage.transform import warp
     import numpy as np
 
     def _warp(pen):
-        raster = pen.ch(rasterized(rect))
+        raster = pen.ch(rasterized(rect, gpu_context=gpu_context))
         image_data = raster.toarray()
         image_data = image_data.reshape(rect.w, rect.h, 4)
         image_rgb = image_data[..., :3]
@@ -382,14 +394,14 @@ def warp(rect, mod):
     return _warp
 
 
-def luma(rect, fill=None):
+def luma(rect, fill=None, gpu_context=None):
     """Chainable function for converting light part of pen/image-on-pen into an alpha channel; see `LumaColorFilter <https://kyamagu.github.io/skia-python/reference/skia.LumaColorFilter.html>`_"""
     def _luma(pen):
-        pen = pen.ch(precompose(rect))
+        pen = pen.ch(precompose(rect, gpu_context=gpu_context))
         pen.attr(skp=dict(ColorFilter=skia.LumaColorFilter.Make()))
         if fill is not None:
             pen = (pen
-                .ch(precompose(rect))
+                .ch(precompose(rect, gpu_context=gpu_context))
                 .attr(skp=dict(ColorFilter=Skfi.fill(normalize_color(fill)))))
         return pen
     return _luma
@@ -400,9 +412,10 @@ def phototype(rect=None,
     cutw=3,
     fill=1,
     rgba=[0, 0, 0, 1],
-    luma=True
+    luma=True,
+    gpu_context=None,
     ):
-    """Chainable function for “exposing” a pen/image-on-pen in the manner of lithofilm, i.e. light-parts are kept, dark parts are thrown away (turned into alpha)"""
+    """Chainable function for "exposing" a pen/image-on-pen in the manner of lithofilm, i.e. light-parts are kept, dark parts are thrown away (turned into alpha)"""
     def _phototype(pen):
         nonlocal rect
         if rect is None:
@@ -424,9 +437,9 @@ def phototype(rect=None,
             cut_filters.append(Skfi.fill(normalize_color(fill)))
 
         return (pen
-            .ch(precompose(rect))
+            .ch(precompose(rect, gpu_context=gpu_context))
             .attr(skp=first_pass)
-            .ch(precompose(rect))
+            .ch(precompose(rect, gpu_context=gpu_context))
             .attr(skp=dict(
                 ColorFilter=Skfi.compose(*cut_filters))))
     
@@ -437,9 +450,10 @@ def color_phototype(rect,
     blur=5,
     cut=127,
     cutw=15,
-    rgba=[1, 1, 1, 1]
+    rgba=[1, 1, 1, 1],
+    gpu_context=None,
     ):
-    return phototype(rect, blur, 255-cut, cutw, fill=None, rgba=rgba, luma=False)
+    return phototype(rect, blur, 255-cut, cutw, fill=None, rgba=rgba, luma=False, gpu_context=gpu_context)
 
 def huerotate(c):
     c = c*360%360
@@ -490,29 +504,29 @@ def channel(c):
         pen.attr(skp=dict(ColorFilter=filter()))
     return _fill
 
-def rgbmod(rect, r=None, g=None, b=None):
+def rgbmod(rect, r=None, g=None, b=None, gpu_context=None):
     def _rgbmod(p):
-        raster = p.ch(rasterized(rect, wrapped=True))
+        raster = p.ch(rasterized(rect, wrapped=True, gpu_context=gpu_context))
         return (P(
             raster.copy()
                 .in_pen()
                 .f(-1)
                 .ch(channel(0))
-                .ch(luma(rect, fill=1))
+                .ch(luma(rect, fill=1, gpu_context=gpu_context))
                 .ch(r)
                 if r else None,
             raster.copy()
                 .in_pen()
                 .f(-1)
                 .ch(channel(1))
-                .ch(luma(rect, fill=1))
+                .ch(luma(rect, fill=1, gpu_context=gpu_context))
                 .ch(g)
                 if g else None,
             raster.copy()
                 .in_pen()
                 .f(-1)
                 .ch(channel(2))
-                .ch(luma(rect, fill=1))
+                .ch(luma(rect, fill=1, gpu_context=gpu_context))
                 .ch(b)
                 if b else None,
             ))
@@ -532,15 +546,15 @@ def round_corners(roundedness=20):
         return p.attr(skp=dict(PathEffect=effect))
     return _round
 
-def draw_canvas(r:Rect, draw_function:callable, in_pen=False):
+def draw_canvas(r:Rect, draw_function:callable, in_pen=False, gpu_context=None):
     from coldtype.img.skiaimage import SkiaImage
-    from coldtype.fx.skia import SKIA_CONTEXT
+    from coldtype.fx.skia import SKIA_CONTEXT, GPU_CONTEXT
     from coldtype.pens.skiapen import SkiaPen
 
     def draw(canvas):
         return draw_function(r, canvas)
 
-    img = SkiaImage(SkiaPen.Precompose(draw, r, context=SKIA_CONTEXT))
+    img = SkiaImage(SkiaPen.Precompose(draw, r, context=SKIA_CONTEXT, gpu_context=gpu_context or GPU_CONTEXT))
     
     if in_pen:
         return img.in_pen().f(-1)
@@ -548,7 +562,7 @@ def draw_canvas(r:Rect, draw_function:callable, in_pen=False):
         return img
 
 
-def text_image(r:Rect, in_pen=True):
+def text_image(r:Rect, in_pen=True, gpu_context=None):
     """
     Requires that annotate=1 is passed to original StSt or Style
     """
@@ -583,11 +597,11 @@ def text_image(r:Rect, in_pen=True):
         def draw(r, canvas):
             canvas.drawTextBlob(blob, x, r.h-y, skia.Paint(AntiAlias=True))
         
-        return draw_canvas(r, draw, in_pen=in_pen)
+        return draw_canvas(r, draw, in_pen=in_pen, gpu_context=gpu_context)
     
     return _text_image, dict(returns=P if in_pen else SkiaImage)
 
-def image_shader(r:Rect, image, sksl, in_pen=True):
+def image_shader(r:Rect, image, sksl, in_pen=True, gpu_context=None, uniforms=None):
     """
     Requires that annotate=1 is passed to original StSt or Style
     """
@@ -595,19 +609,24 @@ def image_shader(r:Rect, image, sksl, in_pen=True):
 
     def _image_shader(p:P):
         def draw(r, canvas):
-            imageShader = image.makeShader(skia.SamplingOptions(skia.FilterMode.kLinear))
+            # Use default makeShader signature
+            imageShader = image.makeShader(skia.TileMode.kClamp, skia.TileMode.kClamp)
 
             effect = skia.RuntimeEffect.MakeForShader(sksl)
 
             children = skia.RuntimeEffectChildPtr(imageShader)
             runtime_effect = skia.SpanRuntimeEffectChildPtr(children, 1)
-            myShader = effect.makeShader(None, runtime_effect)
+            uniform_data = None
+            if uniforms:
+                uniform_data = skia.Data.MakeWithoutCopy(bytes(np.array(list(uniforms.values()), dtype=np.float32)))
+
+            myShader = effect.makeShader(uniform_data, runtime_effect)
             
             paint = skia.Paint()
             paint.setShader(myShader)
             canvas.drawPaint(paint)
 
-        return draw_canvas(r, draw, in_pen=in_pen)
+        return draw_canvas(r, draw, in_pen=in_pen, gpu_context=gpu_context)
     
     return _image_shader, dict(returns=P if in_pen else SkiaImage)
 
@@ -615,12 +634,12 @@ FREEZES = {}
 
 from inspect import getsource
 
-def freeze(do_freeze, as_image, callback, additionals=[]):
+def freeze(do_freeze, as_image, callback, additionals=[], gpu_context=None):
     """
-    Use this function to “freeze” the result of another (expensive) function
-    as an image, so you don’t have to recompute the same thing over and over
+    Use this function to "freeze" the result of another (expensive) function
+    as an image, so you don't have to recompute the same thing over and over
 
-    N.B. Because of a quirk with Python’s introspection facilities, a multi-line
+    N.B. Because of a quirk with Python's introspection facilities, a multi-line
     lambda will work with freeze, but the cache will not update if code changes
     on any line but the first; if you need a multi-line function, pass in a def
     and all the code will be read as a cache key
@@ -655,7 +674,7 @@ def freeze(do_freeze, as_image, callback, additionals=[]):
         #print("FREEZING", src)
         res = callback()
         if as_image:
-            res_img = res.ch(precompose(res.bounds().inset(-100)))
+            res_img = res.ch(precompose(res.bounds().inset(-100), gpu_context=gpu_context))
             FREEZES[src] = [1, res_img]
         else:
             FREEZES[src] = [0, res]

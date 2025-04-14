@@ -72,6 +72,7 @@ class ConfigOption(Enum):
     CronInterval = ("cron_interval", 0, "ci", lambda x: float(x))
 
     KeyboardLayout = ("keyboard_layout", None, "kl")
+    GPU = ("gpu", False, "gpu", true_false_or_none)
 
     @staticmethod
     def Help(e):
@@ -141,6 +142,8 @@ class ConfigOption(Enum):
             return "Print the result"
         elif e == ConfigOption.KeyboardLayout:
             return f"Remap keyboard for layout, options: {list(LAYOUT_REMAPS.keys())}"
+        elif e == ConfigOption.GPU:
+            return "Should the renderer use GPU acceleration (if available)?"
         
 
     @staticmethod
